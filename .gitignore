@@ -1,0 +1,8 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+tests/.state_io_test.json
+recordings/
+states/

@@ -1,0 +1,9 @@
+*.js text eol=lf
+*.cjs text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.maxpat text eol=lf
+*.gendsp text eol=lf
+*.genexpr text eol=lf
+*.wav binary

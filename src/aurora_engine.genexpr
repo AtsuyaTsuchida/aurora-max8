@@ -1,0 +1,113 @@
+// AURORA / 64-voice, sample-clock granular engine. GenExpr / Max 8.
+Buffer source;
+Data voices(64, 7);
+Param position(0.18), scan(0.12), freeze(0), density(28), size(160);
+Param spray(0.12), pitch(0), detune(0.12), reverse(0), width(0.8);
+Param shape(0.3), jitter(0.35), sourcesr(48000), run(0), gain(-15);
+Param cutoff(12000), resonance(0.1), space(0.35), decay(0.65);
+Param echo(0.15), echotime(375), feedback(0.3), drive(0.1);
+History clocker(0), scanphase(0), smoothgain(0), smoothcut(12000);
+History ic1L(0), ic2L(0), ic1R(0), ic2R(0);
+History damp1(0), damp2(0), damp3(0), damp4(0);
+History wetmix(0), echomix(0), smoothdrive(0), smoothres(0);
+History dtime(375), fb(0), roomfb(0.7);
+Delay eL(192000), eR(192000);
+Delay r1(32768), r2(32768), r3(32768), r4(32768);
+
+frames = max(dim(source), 4);
+// Clamp the right channel so mono sources duplicate cleanly.
+scanphase = wrap(scanphase + scan * (1-freeze) * sourcesr / (samplerate*frames), 0, 1);
+cursor = wrap(position + scanphase, 0, 1);
+clocker = clocker - 1;
+fire = (clocker <= 0) && (run > 0.5) && (dim(source) > 8);
+rn1 = noise(); rn2 = noise(); rn3 = noise(); rn4 = noise(); rn5 = noise(); rn6 = noise();
+if (clocker <= 0) {
+    // Bounded interval jitter keeps the maximum overlap within the pool.
+    clocker = samplerate / clamp(density, 2, 100) * (1 + rn6 * jitter * 0.45);
+}
+allocated = 0;
+sumL = 0; sumR = 0; active = 0;
+for (i=0; i<64; i+=1) {
+    age = peek(voices, i, 0);
+    dur = peek(voices, i, 1);
+    start = peek(voices, i, 2);
+    speed = peek(voices, i, 3);
+    pan = peek(voices, i, 4);
+    sh = peek(voices, i, 5);
+    amp = peek(voices, i, 6);
+    if ((age <= 0) && fire && (allocated == 0)) {
+        age = 1;
+        dur = max(16, size * 0.001 * samplerate * (1 + rn2*0.18));
+        start = wrap(cursor + rn1*spray*0.5, 0, 1) * frames;
+        direction = ((rn4*0.5+0.5) < reverse) ? -1 : 1;
+        speed = pow(2, (pitch+rn3*detune)/12) * sourcesr/samplerate * direction;
+        pan = clamp(0.5 + rn5*width*0.5, 0, 1);
+        sh = shape;
+        amp = 0.85 + 0.15*(rn6*0.5+0.5);
+        poke(voices, dur, i, 1); poke(voices, start, i, 2);
+        poke(voices, speed, i, 3); poke(voices, pan, i, 4);
+        poke(voices, sh, i, 5); poke(voices, amp, i, 6);
+        allocated = 1;
+    }
+    if (age > 0) {
+        ph = clamp((age-1)/(dur-1), 0, 1);
+        hann = 0.5 - 0.5*cos(ph*twopi);
+        env = pow(max(hann,0), 1+sh*2) * amp;
+        idx = wrap(start + (age-1)*speed, 0, frames);
+        aL = peek(source, idx, 0, interp="cubic", boundmode="wrap");
+        aR = peek(source, idx, 1, interp="cubic", boundmode="wrap", channelmode="clamp");
+        sumL += aL * env * sqrt(1-pan);
+        sumR += aR * env * sqrt(pan);
+        active += 1;
+        age = (age >= dur) ? 0 : age+1;
+        poke(voices, age, i, 0);
+    }
+}
+// Predictable energy as overlap rises, with generous internal headroom.
+norm = 0.52 / sqrt(max(1, density * size * 0.001 * 0.3));
+xL = sumL*norm; xR = sumR*norm;
+smoothdrive += (drive-smoothdrive)*0.001;
+xL = tanh(xL*(1+smoothdrive*5))/(1+smoothdrive*2);
+xR = tanh(xR*(1+smoothdrive*5))/(1+smoothdrive*2);
+// Topology-preserving state-variable lowpass, independently stereo.
+smoothcut += (cutoff-smoothcut)*0.001;
+smoothres += (resonance-smoothres)*0.001;
+g = tan(pi*clamp(smoothcut,80,samplerate*0.42)/samplerate);
+k = 2-1.7*smoothres;
+a1 = 1/(1+g*(g+k)); a2 = g*a1; a3 = g*a2;
+v3L = xL-ic2L; v1L = a1*ic1L+a2*v3L;
+v2L = ic2L+a2*ic1L+a3*v3L;
+ic1L = fixdenorm(2*v1L-ic1L); ic2L = fixdenorm(2*v2L-ic2L);
+v3R = xR-ic2R; v1R = a1*ic1R+a2*v3R;
+v2R = ic2R+a2*ic1R+a3*v3R;
+ic1R = fixdenorm(2*v1R-ic1R); ic2R = fixdenorm(2*v2R-ic2R);
+// Stereo ping-pong delay, smoothly moving read heads.
+dtime += (echotime-dtime)*0.0001;
+fb += (feedback-fb)*0.001;
+dl = eL.read(clamp(dtime*samplerate*0.001,1,191999), interp="cubic");
+dr = eR.read(clamp(dtime*1.333333*samplerate*0.001,1,191999), interp="cubic");
+eL.write(tanh(v2L+dr*fb)); eR.write(tanh(v2R+dl*fb));
+echomix += (echo-echomix)*0.001;
+dryL = v2L + dl*echomix*0.7;
+dryR = v2R + dr*echomix*0.7;
+// Four-line orthogonal feedback network; bounded feedback, damped tails.
+q1 = r1.read(samplerate*0.0297, interp="linear");
+q2 = r2.read(samplerate*0.0371, interp="linear");
+q3 = r3.read(samplerate*0.0411, interp="linear");
+q4 = r4.read(samplerate*0.0437, interp="linear");
+damp1 = fixdenorm(mix(q1,damp1,0.38)); damp2 = fixdenorm(mix(q2,damp2,0.41));
+damp3 = fixdenorm(mix(q3,damp3,0.43)); damp4 = fixdenorm(mix(q4,damp4,0.39));
+roomfb += ((0.45+0.51*decay)-roomfb)*0.0005;
+r1.write(dryL*0.25+(damp1+damp2+damp3+damp4)*0.5*roomfb);
+r2.write(dryR*0.25+(damp1-damp2+damp3-damp4)*0.5*roomfb);
+r3.write(dryL*0.25+(damp1+damp2-damp3-damp4)*0.5*roomfb);
+r4.write(dryR*0.25+(damp1-damp2-damp3+damp4)*0.5*roomfb);
+wetmix += (space-wetmix)*0.001;
+finalL = dryL*(1-wetmix*0.35) + (q1+q3)*wetmix;
+finalR = dryR*(1-wetmix*0.35) + (q2+q4)*wetmix;
+targetgain = pow(10,gain/20)*run;
+smoothgain += (targetgain-smoothgain)* (1-exp(-1/(samplerate*0.025)));
+out1 = dcblock(finalL)*smoothgain;
+out2 = dcblock(finalR)*smoothgain;
+out3 = cursor;
+out4 = active;

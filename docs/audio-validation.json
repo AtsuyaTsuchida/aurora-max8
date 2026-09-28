@@ -1,0 +1,57 @@
+[
+  {
+    "preset": 0,
+    "sr": 44100,
+    "seconds": 4.85297052154195,
+    "bits": 24,
+    "peak_dbfs": -23.96,
+    "rms_dbfs": -37.42,
+    "stereo_rms_difference": 0.007666,
+    "finite": true,
+    "clipped_samples": 0
+  },
+  {
+    "preset": 1,
+    "sr": 44100,
+    "seconds": 4.85297052154195,
+    "bits": 24,
+    "peak_dbfs": -21.6,
+    "rms_dbfs": -34.75,
+    "stereo_rms_difference": 0.019115,
+    "finite": true,
+    "clipped_samples": 0
+  },
+  {
+    "preset": 2,
+    "sr": 44100,
+    "seconds": 4.841360544217687,
+    "bits": 24,
+    "peak_dbfs": -19.58,
+    "rms_dbfs": -38.64,
+    "stereo_rms_difference": 0.009646,
+    "finite": true,
+    "clipped_samples": 0
+  },
+  {
+    "preset": 3,
+    "sr": 44100,
+    "seconds": 4.85297052154195,
+    "bits": 24,
+    "peak_dbfs": -22.13,
+    "rms_dbfs": -34.44,
+    "stereo_rms_difference": 0.013592,
+    "finite": true,
+    "clipped_samples": 0
+  },
+  {
+    "preset": 4,
+    "sr": 44100,
+    "seconds": 4.85297052154195,
+    "bits": 24,
+    "peak_dbfs": -23.45,
+    "rms_dbfs": -39.62,
+    "stereo_rms_difference": 0.00423,
+    "finite": true,
+    "clipped_samples": 0
+  }
+]

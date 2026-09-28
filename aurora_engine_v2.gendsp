@@ -1,0 +1,146 @@
+{
+  "patcher": {
+    "fileversion": 1,
+    "appversion": {
+      "major": 8,
+      "minor": 6,
+      "revision": 5,
+      "architecture": "x64",
+      "modernui": 1
+    },
+    "classnamespace": "dsp.gen",
+    "rect": [
+      100,
+      100,
+      980,
+      740
+    ],
+    "default_fontsize": 12,
+    "default_fontname": "Arial",
+    "boxes": [
+      {
+        "box": {
+          "id": "code",
+          "maxclass": "codebox",
+          "patching_rect": [
+            30,
+            30,
+            910,
+            580
+          ],
+          "numinlets": 1,
+          "numoutlets": 4,
+          "outlettype": [
+            "",
+            "",
+            "",
+            ""
+          ],
+          "code": "// AURORA / 64-voice, sample-clock granular engine. GenExpr / Max 8.\nBuffer source;\nData voices(64, 7);\nParam position(0.18), scan(0.12), freeze(0), density(28), size(160);\nParam spray(0.12), pitch(0), detune(0.12), reverse(0), width(0.8);\nParam shape(0.3), jitter(0.35), sourcesr(48000), run(0), gain(-15);\nParam cutoff(12000), resonance(0.1), space(0.35), decay(0.65);\nParam echo(0.15), echotime(375), feedback(0.3), drive(0.1);\nHistory clocker(0), scanphase(0), smoothgain(0), smoothcut(12000);\nHistory ic1L(0), ic2L(0), ic1R(0), ic2R(0);\nHistory damp1(0), damp2(0), damp3(0), damp4(0);\nHistory wetmix(0), echomix(0), smoothdrive(0), smoothres(0);\nHistory dtime(375), fb(0), roomfb(0.7);\nDelay eL(192000), eR(192000);\nDelay r1(32768), r2(32768), r3(32768), r4(32768);\n\nframes = max(dim(source), 4);\n// Clamp the right channel so mono sources duplicate cleanly.\nscanphase = wrap(scanphase + scan * (1-freeze) * sourcesr / (samplerate*frames), 0, 1);\ncursor = wrap(position + scanphase, 0, 1);\nclocker = clocker - 1;\nfire = (clocker <= 0) && (run > 0.5) && (dim(source) > 8);\nrn1 = noise(); rn2 = noise(); rn3 = noise(); rn4 = noise(); rn5 = noise(); rn6 = noise();\nif (clocker <= 0) {\n    // Bounded interval jitter keeps the maximum overlap within the pool.\n    clocker = samplerate / clamp(density, 2, 100) * (1 + rn6 * jitter * 0.45);\n}\nallocated = 0;\nsumL = 0; sumR = 0; active = 0;\nfor (i=0; i<64; i+=1) {\n    age = peek(voices, i, 0);\n    dur = peek(voices, i, 1);\n    start = peek(voices, i, 2);\n    speed = peek(voices, i, 3);\n    pan = peek(voices, i, 4);\n    sh = peek(voices, i, 5);\n    amp = peek(voices, i, 6);\n    if ((age <= 0) && fire && (allocated == 0)) {\n        age = 1;\n        dur = max(16, size * 0.001 * samplerate * (1 + rn2*0.18));\n        start = wrap(cursor + rn1*spray*0.5, 0, 1) * frames;\n        direction = ((rn4*0.5+0.5) < reverse) ? -1 : 1;\n        speed = pow(2, (pitch+rn3*detune)/12) * sourcesr/samplerate * direction;\n        pan = clamp(0.5 + rn5*width*0.5, 0, 1);\n        sh = shape;\n        amp = 0.85 + 0.15*(rn6*0.5+0.5);\n        poke(voices, dur, i, 1); poke(voices, start, i, 2);\n        poke(voices, speed, i, 3); poke(voices, pan, i, 4);\n        poke(voices, sh, i, 5); poke(voices, amp, i, 6);\n        allocated = 1;\n    }\n    if (age > 0) {\n        ph = clamp((age-1)/(dur-1), 0, 1);\n        hann = 0.5 - 0.5*cos(ph*twopi);\n        env = pow(max(hann,0), 1+sh*2) * amp;\n        idx = wrap(start + (age-1)*speed, 0, frames);\n        aL = peek(source, idx, 0, interp=\"cubic\", boundmode=\"wrap\");\n        aR = peek(source, idx, 1, interp=\"cubic\", boundmode=\"wrap\", channelmode=\"clamp\");\n        sumL += aL * env * sqrt(1-pan);\n        sumR += aR * env * sqrt(pan);\n        active += 1;\n        age = (age >= dur) ? 0 : age+1;\n        poke(voices, age, i, 0);\n    }\n}\n// Predictable energy as overlap rises, with generous internal headroom.\nnorm = 0.52 / sqrt(max(1, density * size * 0.001 * 0.3));\nxL = sumL*norm; xR = sumR*norm;\nsmoothdrive += (drive-smoothdrive)*0.001;\nxL = tanh(xL*(1+smoothdrive*5))/(1+smoothdrive*2);\nxR = tanh(xR*(1+smoothdrive*5))/(1+smoothdrive*2);\n// Topology-preserving state-variable lowpass, independently stereo.\nsmoothcut += (cutoff-smoothcut)*0.001;\nsmoothres += (resonance-smoothres)*0.001;\ng = tan(pi*clamp(smoothcut,80,samplerate*0.42)/samplerate);\nk = 2-1.7*smoothres;\na1 = 1/(1+g*(g+k)); a2 = g*a1; a3 = g*a2;\nv3L = xL-ic2L; v1L = a1*ic1L+a2*v3L;\nv2L = ic2L+a2*ic1L+a3*v3L;\nic1L = fixdenorm(2*v1L-ic1L); ic2L = fixdenorm(2*v2L-ic2L);\nv3R = xR-ic2R; v1R = a1*ic1R+a2*v3R;\nv2R = ic2R+a2*ic1R+a3*v3R;\nic1R = fixdenorm(2*v1R-ic1R); ic2R = fixdenorm(2*v2R-ic2R);\n// Stereo ping-pong delay, smoothly moving read heads.\ndtime += (echotime-dtime)*0.0001;\nfb += (feedback-fb)*0.001;\ndl = eL.read(clamp(dtime*samplerate*0.001,1,191999), interp=\"cubic\");\ndr = eR.read(clamp(dtime*1.333333*samplerate*0.001,1,191999), interp=\"cubic\");\neL.write(tanh(v2L+dr*fb)); eR.write(tanh(v2R+dl*fb));\nechomix += (echo-echomix)*0.001;\ndryL = v2L + dl*echomix*0.7;\ndryR = v2R + dr*echomix*0.7;\n// Four-line orthogonal feedback network; bounded feedback, damped tails.\nq1 = r1.read(samplerate*0.0297, interp=\"linear\");\nq2 = r2.read(samplerate*0.0371, interp=\"linear\");\nq3 = r3.read(samplerate*0.0411, interp=\"linear\");\nq4 = r4.read(samplerate*0.0437, interp=\"linear\");\ndamp1 = fixdenorm(mix(q1,damp1,0.38)); damp2 = fixdenorm(mix(q2,damp2,0.41));\ndamp3 = fixdenorm(mix(q3,damp3,0.43)); damp4 = fixdenorm(mix(q4,damp4,0.39));\nroomfb += ((0.45+0.51*decay)-roomfb)*0.0005;\nr1.write(dryL*0.25+(damp1+damp2+damp3+damp4)*0.5*roomfb);\nr2.write(dryR*0.25+(damp1-damp2+damp3-damp4)*0.5*roomfb);\nr3.write(dryL*0.25+(damp1+damp2-damp3-damp4)*0.5*roomfb);\nr4.write(dryR*0.25+(damp1-damp2-damp3+damp4)*0.5*roomfb);\nwetmix += (space-wetmix)*0.001;\nfinalL = dryL*(1-wetmix*0.35) + (q1+q3)*wetmix;\nfinalR = dryR*(1-wetmix*0.35) + (q2+q4)*wetmix;\ntargetgain = pow(10,gain/20)*run;\nsmoothgain += (targetgain-smoothgain)* (1-exp(-1/(samplerate*0.025)));\nout1 = dcblock(finalL)*smoothgain;\nout2 = dcblock(finalR)*smoothgain;\nout3 = cursor;\nout4 = active;\n"
+        }
+      },
+      {
+        "box": {
+          "id": "out0",
+          "maxclass": "newobj",
+          "patching_rect": [
+            40,
+            650,
+            50,
+            22
+          ],
+          "text": "out 1"
+        }
+      },
+      {
+        "box": {
+          "id": "out1",
+          "maxclass": "newobj",
+          "patching_rect": [
+            240,
+            650,
+            50,
+            22
+          ],
+          "text": "out 2"
+        }
+      },
+      {
+        "box": {
+          "id": "out2",
+          "maxclass": "newobj",
+          "patching_rect": [
+            440,
+            650,
+            50,
+            22
+          ],
+          "text": "out 3"
+        }
+      },
+      {
+        "box": {
+          "id": "out3",
+          "maxclass": "newobj",
+          "patching_rect": [
+            640,
+            650,
+            50,
+            22
+          ],
+          "text": "out 4"
+        }
+      }
+    ],
+    "lines": [
+      {
+        "patchline": {
+          "source": [
+            "code",
+            0
+          ],
+          "destination": [
+            "out0",
+            0
+          ]
+        }
+      },
+      {
+        "patchline": {
+          "source": [
+            "code",
+            1
+          ],
+          "destination": [
+            "out1",
+            0
+          ]
+        }
+      },
+      {
+        "patchline": {
+          "source": [
+            "code",
+            2
+          ],
+          "destination": [
+            "out2",
+            0
+          ]
+        }
+      },
+      {
+        "patchline": {
+          "source": [
+            "code",
+            3
+          ],
+          "destination": [
+            "out3",
+            0
+          ]
+        }
+      }
+    ]
+  }
+}

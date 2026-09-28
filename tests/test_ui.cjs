@@ -1,0 +1,10 @@
+const fs=require('fs'), vm=require('vm'), assert=require('assert');
+const messages=[];
+const ctx={jsarguments:['aurora_ui.js','test'],box:{rect:[0,0,1120,750]},mgraphics:new Proxy({},{get:()=>()=>{}}),outlet:(...a)=>messages.push(a),post:console.log,notifyclients:()=>{},arrayfromargs:(a)=>Array.from(a)};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('aurora_ui.js','utf8'),ctx);
+ctx.paint();console.log('buttons',ctx.buttons.length,'knobs',ctx.knobs.length);
+ctx.onclick(500,110,1,0,0);console.log('preset after click',ctx.presetIndex);assert.equal(ctx.presetIndex,2);
+ctx.onclick(880,40,1,0,0);assert.equal(ctx.running,1);
+ctx.onclick(403,397,1,0,0);ctx.ondrag(403,350,1,0,0);assert(ctx.v.size>35);
+const state=ctx.getvalueof();ctx.preset(4);ctx.setvalueof(state);assert.equal(ctx.v.pitch,12);
+console.log('UI: click, play, drag, state round trip PASS');
